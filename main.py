@@ -124,7 +124,7 @@ def parse_and_format_message(text):
 
     # Only claim code is monospace
     formatted_message = (
-        f"🎁 Code: <code>{code}</code>\n"
+        f"🎁 <code>{code}</code>\n"
         f"💰 Amount: {amount} {token}\n"
         f"🧧 Progress: {claimed} / {total}\n"
         f"#Binance #RedPacket"
