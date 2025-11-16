@@ -126,8 +126,8 @@ def parse_and_format_message(text):
     formatted_message = (
         f"🎁 Code: <code>{code}</code>\n"
         f"💰 Amount: {amount} {token}\n"
-        f"🧧 Progress: {claimed} / {total}\n\n"
-        f"#Binance #RedPacketHub"
+        f"🧧 Progress: {claimed} / {total}\n"
+        f"#Binance #RedPacket"
     )
     return formatted_message
 
