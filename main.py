@@ -83,65 +83,38 @@ last_forward_time = 0
 # ----------------------
 # Helper functions
 # ----------------------
-def strip_html_tags(text):
-    """Remove any <a>, <b>, <i>, etc. from source message"""
-    return re.sub(r'<[^>]+>', '', text)
-
-def parse_and_format_message(event_message):
+def parse_and_format_message(text):
     """
-    Parse new format messages:
-    💰 ± AMOUNT TOKEN
-    🧧 Remaining: N
-    🎁 Claim (with Binance hyperlink)
-
-    Only include Claim hyperlink, ignore token hyperlink
+    Forward only messages of the form:
+    🎁 CODE
+    👥 CODE
+    Ignore any other messages.
+    Replace emoji with a clickable link to BinanceRedPacket_Hub.
     """
-    if not event_message.message:
+    if not text:
         return None
 
-    # Remove zero-width chars
-    text = re.sub(r'[\u200b\u200c\u200d\uFEFF]', '', event_message.message)
-    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    if len(lines) < 3:
+    # Remove zero-width characters and HTML tags
+    cleaned = re.sub(r'[\u200b\u200c\u200d\uFEFF]', '', text)
+    cleaned = re.sub(r'<[^>]+>', '', cleaned)
+
+    # Strip leading/trailing spaces
+    cleaned = cleaned.strip()
+
+    # Match 🎁 or 👥 followed by code
+    m = re.match(r'^(🎁|👥)\s*([A-Z0-9]+)$', cleaned)
+    if not m:
         return None
 
-    # Line 1: Amount + Token
-    m1 = re.search(r'±\s*([0-9]*\.?[0-9]+)\s*([A-Za-z0-9_]+)', lines[0])
-    if not m1:
-        return None
-    amount = m1.group(1)
-    token = m1.group(2)
+    emoji = m.group(1)
+    code = m.group(2)
 
-    # Line 2: Remaining
-    m2 = re.search(r'Remaining:\s*(\d+)', lines[1], flags=re.IGNORECASE)
-    if not m2:
-        return None
-    remaining = m2.group(1)
+    # Make emoji a clickable link
+    link = f'<a href="https://t.me/BinanceRedPacket_Hub">{emoji}</a>'
 
-    # Line 3: Claim link
-    claim_link = None
-    if event_message.entities:
-        for e in event_message.entities:
-            if isinstance(e, types.MessageEntityTextUrl):
-                claim_link = e.url
-                break
-    if not claim_link:
-        # Fallback: sometimes URL may be plain text
-        urls = re.findall(r'https?://\S+', lines[2])
-        if urls:
-            claim_link = urls[0]
+    # Format as HTML with monospace code
+    formatted = f"{link} <code>{html.escape(code)}</code>"
 
-    if not claim_link:
-        logging.info("Skipped message: Claim link not found")
-        return None
-
-    # Format output HTML message
-    formatted = (
-        f"💰 {amount} {token}\n"
-        f"🧧 Remaining: {remaining}\n"
-        f'🎁 <a href="{claim_link}">Claim</a>\n'
-        f"#Binance #RedPacket #Hub"
-    )
     return formatted
 
 # ----------------------
@@ -152,13 +125,9 @@ async def new_message_handler(event):
     global is_forwarding, last_forward_time
 
     try:
-        # Skip any messages containing hyperlinks other than Claim (safety)
         raw_text = event.message.message or ""
-        if "<a href=" in raw_text.lower() and not "🎁" in raw_text:
-            logging.info("Skipped message due to unrelated hyperlink.")
-            return
 
-        parsed = parse_and_format_message(event.message)
+        parsed = parse_and_format_message(raw_text)
         if not parsed:
             return
 
