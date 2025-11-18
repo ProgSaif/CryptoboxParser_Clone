@@ -11,7 +11,7 @@ from flask import Flask
 from telethon import TelegramClient, events, types
 from dotenv import load_dotenv
 
-# Load .env in dev; Railway provides env vars via the dashboard
+# Load .env
 load_dotenv()
 
 # ----------------------
@@ -24,7 +24,7 @@ logging.basicConfig(
 )
 
 # ----------------------
-# Flask keep-alive (Railway Web Process)
+# Flask keep-alive
 # ----------------------
 app = Flask(__name__)
 
@@ -39,7 +39,7 @@ def keep_alive(port):
     Thread(target=run_web, args=(port,), daemon=True).start()
 
 # ----------------------
-# Env loader + helpers
+# Env helper
 # ----------------------
 def get_env(name, default=None, required=False, cast=str):
     val = os.environ.get(name, default)
@@ -80,97 +80,85 @@ message_queue = deque()
 is_forwarding = False
 last_forward_time = 0
 
-# ----------------------
-# Helper functions
-# ----------------------
-def strip_html_tags(text):
-    """Remove any <a>, <b>, <i>, etc. from source message"""
-    return re.sub(r'<[^>]+>', '', text)
+# Temp storage for pairing
+last_message_data = {
+    "amount": None,
+    "token": None,
+    "remaining": None
+}
 
-def parse_and_format_message(text):
+# ----------------------
+# Parse Message 1 (text)
+# ----------------------
+def parse_message_one(text):
     """
-    Extract 3-line format:
-    💰 ± AMOUNT TOKEN
-    🧧 Claimed: X / Y
-    🎁 CODE
-    Then return formatted HTML with token hyperlink + monospace CODE.
+    Looks like:
+    💰 ± 2.00 BTTC
+    🧧 Remaining: 9488
     """
-    if not text:
+
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if len(lines) < 2:
         return None
 
-    cleaned = strip_html_tags(text)
-    cleaned = re.sub(r'[\u200b\u200c\u200d\uFEFF]', '', cleaned)
-
-    lines = [ln.strip() for ln in cleaned.splitlines() if ln.strip()]
-    if len(lines) < 3:
-        return None
-
-    # Amount + Token
+    # Extract amount + token
     m1 = re.search(r'±\s*([0-9]*\.?[0-9]+)\s*([A-Za-z0-9_]+)', lines[0])
     if not m1:
         return None
     amount = m1.group(1).strip()
     token = m1.group(2).strip()
 
-    # Claimed progress
-    m2 = re.search(r'Claimed:\s*(\d+)\s*/\s*(\d+)', lines[1], flags=re.IGNORECASE)
+    # Extract remaining
+    m2 = re.search(r'Remaining:\s*(\d+)', lines[1], flags=re.IGNORECASE)
     if not m2:
         return None
-    claimed = m2.group(1)
-    total = m2.group(2)
+    remaining = m2.group(1)
 
-    # Code
-    m3 = re.search(r'🎁\s*([A-Z0-9]+)', lines[2])
-    if not m3:
-        return None
-    code = m3.group(1).strip()
+    return amount, token, remaining
 
-    # -------- NEW TOKEN HYPERLINK HERE --------
-    token_link = f'<a href="https://t.me/BinanceRedPacket_Hub">{token}</a>'
+# ----------------------
+# Extract Claim URL from Message 2 (button link)
+# ----------------------
+async def extract_claim_url(event):
+    """
+    Message 2 has a real external URL in event.message.entities (URL preview)
+    or attached web link.
+    """
+    msg = event.message
+
+    # entity type: MessageEntityTextUrl or MessageEntityUrl
+    if msg.entities:
+        for e in msg.entities:
+            if isinstance(e, types.MessageEntityTextUrl):
+                return e.url
+            if isinstance(e, types.MessageEntityUrl):
+                # URL inside message text
+                full_text = msg.raw_text
+                return full_text[e.offset:e.offset + e.length]
+
+    # Possibly via msg.media.webpage
+    if msg.media and hasattr(msg.media, "webpage"):
+        if hasattr(msg.media.webpage, "url") and msg.media.webpage.url:
+            return msg.media.webpage.url
+
+    return None
+
+# ----------------------
+# Build final formatted output
+# ----------------------
+def build_final_message(a, t, r, claim_url):
+    token_link = f'<a href="https://t.me/BinanceRedPacket_Hub">{t}</a>'
+    claim_link = f'<a href="{claim_url}">Claim</a>'
 
     formatted = (
-        f" <code>{html.escape(code)}</code>\n\n"
-        f"💰 {amount} {token_link}\n"
-        f"🧧 Progress: {claimed} / {total}\n"
-        f"#Binance #RedPacket #Hub"
+        f"💰 ± {a} {token_link}\n"
+        f"🧧 Remaining: {r}\n\n"
+        f"🎁 {claim_link}"
     )
-
     return formatted
 
 # ----------------------
-# Handle incoming messages
-# ----------------------
-@client.on(events.NewMessage(chats=SOURCE_CHANNELS))
-async def new_message_handler(event):
-    global is_forwarding, last_forward_time
-
-    try:
-        raw_text = event.message.message or ""
-
-        # Skip any messages containing hyperlinks
-        if "http://" in raw_text.lower() or "https://" in raw_text.lower() or "<a href=" in raw_text.lower():
-            logging.info("Skipped message due to hyperlink in source.")
-            return
-
-        parsed = parse_and_format_message(raw_text)
-        if not parsed:
-            return
-
-        now = time.time()
-        if (not is_forwarding) or (now - last_forward_time > RATE_LIMIT):
-            await forward_to_targets(parsed)
-            last_forward_time = now
-            is_forwarding = True
-            client.loop.create_task(process_queue())
-        else:
-            message_queue.append(parsed)
-            logging.info(f"Queued message (size={len(message_queue)})")
-
-    except Exception:
-        logging.exception("Error in handler:")
-
-# ----------------------
-# Forward messages
+# Forward logic
 # ----------------------
 async def forward_to_targets(html_message):
     for ch in TARGET_CHANNELS:
@@ -195,10 +183,68 @@ async def process_queue():
     is_forwarding = False
 
 # ----------------------
-# Reconnection handler
+# Main Handler
+# ----------------------
+@client.on(events.NewMessage(chats=SOURCE_CHANNELS))
+async def handler(event):
+    global last_message_data, is_forwarding, last_forward_time
+
+    text = event.message.message or ""
+
+    # Detect type of message: Message 1 or Message 2
+    # -----------------------------------------------------
+
+    # ---------- MESSAGE 1: No URL, text only ----------
+    if ("±" in text) and ("Remaining" in text) and ("Claim" not in text):
+        parsed = parse_message_one(text)
+        if parsed:
+            a, t, r = parsed
+            last_message_data["amount"] = a
+            last_message_data["token"] = t
+            last_message_data["remaining"] = r
+            logging.info("Message 1 parsed successfully.")
+        return
+
+    # ---------- MESSAGE 2: Claim button ----------
+    if "Claim" in text:
+        claim_url = await extract_claim_url(event)
+
+        if not claim_url:
+            logging.info("Message 2 received but no claim URL found — skipping.")
+            return
+
+        a = last_message_data["amount"]
+        t = last_message_data["token"]
+        r = last_message_data["remaining"]
+
+        # Only forward if pair is complete
+        if not (a and t and r):
+            logging.info("Incomplete pair detected — discarding.")
+            last_message_data = {"amount": None, "token": None, "remaining": None}
+            return
+
+        final_msg = build_final_message(a, t, r, claim_url)
+
+        # Reset buffer after building
+        last_message_data = {"amount": None, "token": None, "remaining": None}
+
+        # Rate limiting & queue
+        now = time.time()
+        if (not is_forwarding) or (now - last_forward_time > RATE_LIMIT):
+            await forward_to_targets(final_msg)
+            last_forward_time = now
+            is_forwarding = True
+            client.loop.create_task(process_queue())
+        else:
+            message_queue.append(final_msg)
+            logging.info(f"Queued message (size={len(message_queue)})")
+        return
+
+# ----------------------
+# Reconnect Handler
 # ----------------------
 @client.on(events.Raw)
-async def handle_raw(event):
+async def raw_handler(event):
     if isinstance(event, types.UpdateConnectionState):
         if event.state == types.ConnectionState.disconnected:
             logging.warning("Disconnected. Reconnecting...")
@@ -209,7 +255,7 @@ async def handle_raw(event):
                 logging.exception("Reconnect failed")
 
 # ----------------------
-# Start bot
+# Start Bot
 # ----------------------
 async def run_bot():
     await client.start(bot_token=BOT_TOKEN)
