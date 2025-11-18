@@ -89,7 +89,7 @@ def parse_and_format_message(text):
     🎁 CODE
     👥 CODE
     Ignore any other messages.
-    Replace emoji with a clickable link to BinanceRedPacket_Hub.
+    Replace emoji with clickable 🧧 link.
     """
     if not text:
         return None
@@ -106,8 +106,10 @@ def parse_and_format_message(text):
     if not m:
         return None
 
-    emoji = m.group(1)
     code = m.group(2)
+
+    # Replace original emoji with 🧧
+    emoji = "🧧"
 
     # Make emoji a clickable link
     link = f'<a href="https://t.me/BinanceRedPacket_Hub">{emoji}</a>'
