@@ -115,7 +115,7 @@ def parse_and_format_message(text):
     link = f'<a href="https://t.me/BinanceRedPacket_Hub">{emoji}</a>'
 
     # Format as HTML with monospace code
-    formatted = f"{link} <code>{html.escape(code)}</code>\n\n﹍﹍﹍﹍﹍﹍﹍﹍﹍﹍﹍\n➠ @TheBinance_Hub \n#Binance #RedPacket_Hub"
+    formatted = f"{link} <code>{html.escape(code)}</code>\n\n﹍﹍﹍﹍﹍﹍﹍﹍﹍﹍﹍﹍\n➠ @TheBinance_Hub \n#Binance #RedPacket_Hub"
 
     return formatted
 
