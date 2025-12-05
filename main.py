@@ -85,39 +85,49 @@ last_forward_time = 0
 # ----------------------
 def parse_and_format_message(text):
     """
-    Forward only messages of the form:
+    Extract only valid messages:
     🎁 CODE
     👥 CODE
-    Ignore any other messages.
+    Ignore extra lines like '- Sent via TeleFeed'
     Replace emoji with clickable 🧧 link.
     """
+
     if not text:
         return None
 
+    # Split lines, remove empty ones
+    lines = [line.strip() for line in text.split("\n") if line.strip()]
+    if not lines:
+        return None
+
+    # Only check first real line
+    first_line = lines[0]
+
     # Remove zero-width characters and HTML tags
-    cleaned = re.sub(r'[\u200b\u200c\u200d\uFEFF]', '', text)
-    cleaned = re.sub(r'<[^>]+>', '', cleaned)
+    cleaned = re.sub(r'[\u200b\u200c\u200d\uFEFF]', '', first_line)
+    cleaned = re.sub(r'<[^>]+>', '', cleaned).strip()
 
-    # Strip leading/trailing spaces
-    cleaned = cleaned.strip()
-
-    # Match 🎁 or 👥 followed by code
+    # Match 🎁 or 👥 + CODE
     m = re.match(r'^(🎁|👥)\s*([A-Z0-9]+)$', cleaned)
     if not m:
         return None
 
     code = m.group(2)
 
-    # Replace original emoji with 🧧
+    # New emoji
     emoji = "🧧"
 
-    # Make emoji a clickable link
+    # Clickable link
     link = f'<a href="https://t.me/BinanceRedPacket_Hub">{emoji}</a>'
 
-    # Format as HTML with monospace code
-    formatted = f"{link} <code>{html.escape(code)}</code>\n\n﹍﹍﹍﹍﹍﹍﹍﹍﹍﹍﹍﹍\n➠ @TheBinance_Hub \n#Binance #RedPacket_Hub"
+    # Final formatted output
+    formatted = (
+        f"{link} <code>{html.escape(code)}</code>\n\n"
+        f"#Binance #RedPacket"
+    )
 
     return formatted
+
 
 # ----------------------
 # Handle incoming messages
